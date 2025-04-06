@@ -13,5 +13,6 @@ pub fn main() !void {
 
     const conn = try listener.accept();
     try conn.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
+    conn.stream.close();
     try stdout.print("client connected!", .{});
 }
