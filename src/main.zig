@@ -23,8 +23,8 @@ pub fn main() !void {
     const path = token.next().?;
 
     if (std.mem.eql(u8, path, "/")) {
-        try conn.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
-    } else {
         try conn.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
+    } else {
+        try conn.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
     }
 }
