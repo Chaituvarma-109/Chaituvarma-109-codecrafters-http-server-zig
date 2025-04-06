@@ -12,6 +12,6 @@ pub fn main() !void {
     defer listener.deinit();
 
     const conn = try listener.accept();
-    conn.stream.write("HTTP/1.1 200 OK\r\n\r\n");
+    try conn.stream.write("HTTP/1.1 200 OK\r\n\r\n");
     try stdout.print("client connected!", .{});
 }
