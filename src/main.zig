@@ -1,9 +1,11 @@
 const std = @import("std");
 const net = std.net;
+const http = std.http;
+
+// const stdout = std.io.getStdOut().writer();
 
 pub fn main() !void {
     const page_alloc = std.heap.page_allocator;
-    // const stdout = std.io.getStdOut().writer();
 
     // Uncomment this block to pass the first stage
     const address = try net.Address.resolveIp("127.0.0.1", 4221);
@@ -14,24 +16,47 @@ pub fn main() !void {
 
     const conn = try listener.accept();
     defer conn.stream.close();
-    const buff = try page_alloc.alloc(u8, 1024);
-    defer page_alloc.free(buff);
 
-    _ = try conn.stream.read(buff);
-    var token = std.mem.splitSequence(u8, buff, " ");
-    _ = token.next();
-    const path = token.next().?;
-    var path_token = std.mem.splitSequence(u8, path, "/");
-    _ = path_token.next();
-    const root = path_token.next().?;
+    var buff: [1024]u8 = undefined;
+    var server = http.Server.init(conn, &buff);
 
-    if (std.mem.eql(u8, path, "/")) {
-        try conn.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
-    } else if (std.mem.eql(u8, root, "echo")) {
-        const echo_arg = path[6..];
-        const res = try std.fmt.allocPrint(page_alloc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}", .{ echo_arg.len, echo_arg });
-        try conn.stream.writeAll(res);
+    while (server.state == .ready) {
+        var req = server.receiveHead() catch |err| switch (err) {
+            error.HttpConnectionClosing => continue,
+            else => |e| return e,
+        };
+
+        try handleRequest(&req, page_alloc);
+    }
+}
+
+fn handleRequest(request: *http.Server.Request, _: std.mem.Allocator) !void {
+    // const body = try (try request.reader()).readAllAlloc(allocator, 1024);
+    // defer allocator.free(body);
+
+    if (std.mem.startsWith(u8, request.head.target, "/index.html")) {
+        try request.respond("", .{});
+    } else if (std.mem.eql(u8, request.head.target, "/")) {
+        try request.respond("", .{});
+    } else if (std.mem.startsWith(u8, request.head.target, "/echo")) {
+        var echo = std.mem.splitAny(u8, request.head.target, "/");
+        _ = echo.next();
+        _ = echo.next();
+        const respEcho = echo.next().?;
+
+        try request.respond(respEcho, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} });
+    } else if (std.mem.startsWith(u8, request.head.target, "/user-agent")) {
+        var it = request.iterateHeaders();
+        var respBody: []const u8 = undefined;
+
+        while (it.next()) |header| {
+            if (std.mem.eql(u8, header.name, "User-Agent")) {
+                respBody = header.value;
+            }
+        }
+
+        try request.respond(respBody, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} });
     } else {
-        try conn.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
+        try request.respond("", .{ .status = .not_found });
     }
 }
