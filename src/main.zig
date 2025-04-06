@@ -18,7 +18,7 @@ pub fn main() !void {
     defer page_alloc.free(buff);
 
     _ = try conn.stream.read(buff);
-    const token = std.mem.splitSequence(u8, buff, " ");
+    var token = std.mem.splitSequence(u8, buff, " ");
     _ = token.next();
     const path = token.next().?;
 
