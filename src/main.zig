@@ -21,9 +21,16 @@ pub fn main() !void {
     var token = std.mem.splitSequence(u8, buff, " ");
     _ = token.next();
     const path = token.next().?;
+    var path_token = std.mem.splitSequence(u8, path, "/");
+    _ = path_token.next();
+    const root = path_token.next().?;
 
     if (std.mem.eql(u8, path, "/")) {
         try conn.stream.writeAll("HTTP/1.1 200 OK\r\n\r\n");
+    } else if (std.mem.eql(u8, root, "echo")) {
+        const echo_arg = path[6..];
+        const res = try std.fmt.allocPrint(page_alloc, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {d}\r\n\r\n{s}", .{ echo_arg.len, echo_arg });
+        try conn.stream.writeAll(res);
     } else {
         try conn.stream.writeAll("HTTP/1.1 404 Not Found\r\n\r\n");
     }
