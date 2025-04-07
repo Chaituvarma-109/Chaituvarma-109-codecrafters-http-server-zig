@@ -86,7 +86,13 @@ fn handleRequest(request: *http.Server.Request, alloc: std.mem.Allocator, dirnam
         }
 
         if (supports_gzip) {
-            request.respond(respEcho, .{ .extra_headers = &.{ .{ .name = "Content-Type", .value = "text/plain" }, .{ .name = "Content-Encoding", .value = "gzip" } } }) catch |err| {
+            var arr = std.ArrayList(u8).init(alloc);
+            defer arr.deinit();
+
+            var buff = std.io.fixedBufferStream(respEcho);
+            try std.compress.gzip.compress(buff.reader(), arr.writer(), .{});
+
+            request.respond(arr.items, .{ .extra_headers = &.{ .{ .name = "Content-Type", .value = "text/plain" }, .{ .name = "Content-Encoding", .value = "gzip" } } }) catch |err| {
                 std.log.err("Error responding to request: {}", .{err});
             };
         } else {
