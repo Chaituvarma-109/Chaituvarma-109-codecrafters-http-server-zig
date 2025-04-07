@@ -71,17 +71,22 @@ fn handleRequest(request: *http.Server.Request, alloc: std.mem.Allocator, dirnam
         };
     } else if (std.mem.startsWith(u8, request.head.target, "/echo")) {
         const respEcho = request.head.target[6..];
-        var it = request.iterateHeaders();
-        var contentenc: []const u8 = undefined;
+        var iter = request.iterateHeaders();
+        var supports_gzip = false;
 
-        while (it.next()) |header| {
+        while (iter.next()) |header| {
             if (std.mem.eql(u8, header.name, "Accept-Encoding")) {
-                contentenc = header.value;
+                var it = std.mem.splitAny(u8, header.value, ", ");
+                while (it.next()) |val| {
+                    if (std.mem.eql(u8, val, "gzip")) {
+                        supports_gzip = true;
+                    }
+                }
             }
         }
 
-        if (std.mem.eql(u8, contentenc, "gzip")) {
-            request.respond(respEcho, .{ .extra_headers = &.{ .{ .name = "Content-Type", .value = "text/plain" }, .{ .name = "Content-Encoding", .value = contentenc } } }) catch |err| {
+        if (supports_gzip) {
+            request.respond(respEcho, .{ .extra_headers = &.{ .{ .name = "Content-Type", .value = "text/plain" }, .{ .name = "Content-Encoding", .value = "gzip" } } }) catch |err| {
                 std.log.err("Error responding to request: {}", .{err});
             };
         } else {
