@@ -1,11 +1,15 @@
 const std = @import("std");
 const net = std.net;
 const http = std.http;
+const Pool = std.Thread.Pool;
 
 // const stdout = std.io.getStdOut().writer();
 
 pub fn main() !void {
     const page_alloc = std.heap.page_allocator;
+    var pool: std.Thread.Pool = undefined;
+    try pool.init(Pool.Options{ .n_jobs = 4, .allocator = page_alloc });
+    defer pool.deinit();
 
     // Uncomment this block to pass the first stage
     const address = try net.Address.resolveIp("127.0.0.1", 4221);
@@ -14,7 +18,14 @@ pub fn main() !void {
     });
     defer listener.deinit();
 
-    const conn = try listener.accept();
+    while (true) {
+        const conn = try listener.accept();
+
+        try pool.spawn(connServer, .{ conn, page_alloc });
+    }
+}
+
+fn connServer(conn: net.Server.Connection, alloc: std.mem.Allocator) void {
     defer conn.stream.close();
 
     var buff: [1024]u8 = undefined;
@@ -23,10 +34,15 @@ pub fn main() !void {
     while (server.state == .ready) {
         var req = server.receiveHead() catch |err| switch (err) {
             error.HttpConnectionClosing => continue,
-            else => |e| return e,
+            else => |e| {
+                std.log.err("Error responding to request: {}", .{e});
+                continue;
+            },
         };
 
-        try handleRequest(&req, page_alloc);
+        handleRequest(&req, alloc) catch |err| {
+            std.log.err("Error handling request: {}", .{err});
+        };
     }
 }
 
@@ -35,16 +51,22 @@ fn handleRequest(request: *http.Server.Request, _: std.mem.Allocator) !void {
     // defer allocator.free(body);
 
     if (std.mem.startsWith(u8, request.head.target, "/index.html")) {
-        try request.respond("", .{});
+        request.respond("", .{}) catch |err| {
+            std.log.err("Error responding to request: {}", .{err});
+        };
     } else if (std.mem.eql(u8, request.head.target, "/")) {
-        try request.respond("", .{});
+        request.respond("", .{}) catch |err| {
+            std.log.err("Error responding to request: {}", .{err});
+        };
     } else if (std.mem.startsWith(u8, request.head.target, "/echo")) {
         var echo = std.mem.splitAny(u8, request.head.target, "/");
         _ = echo.next();
         _ = echo.next();
         const respEcho = echo.next().?;
 
-        try request.respond(respEcho, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} });
+        request.respond(respEcho, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} }) catch |err| {
+            std.log.err("Error responding to request: {}", .{err});
+        };
     } else if (std.mem.startsWith(u8, request.head.target, "/user-agent")) {
         var it = request.iterateHeaders();
         var respBody: []const u8 = undefined;
@@ -55,8 +77,12 @@ fn handleRequest(request: *http.Server.Request, _: std.mem.Allocator) !void {
             }
         }
 
-        try request.respond(respBody, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} });
+        request.respond(respBody, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} }) catch |err| {
+            std.log.err("Error responding to request: {}", .{err});
+        };
     } else {
-        try request.respond("", .{ .status = .not_found });
+        request.respond("", .{ .status = .not_found }) catch |err| {
+            std.log.err("Error responding to request: {}", .{err});
+        };
     }
 }
