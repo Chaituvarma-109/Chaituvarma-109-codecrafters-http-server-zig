@@ -61,9 +61,6 @@ fn connServer(conn: net.Server.Connection, alloc: std.mem.Allocator, dirname: []
 }
 
 fn handleRequest(request: *http.Server.Request, alloc: std.mem.Allocator, dirname: []const u8) !void {
-    // const body = try (try request.reader()).readAllAlloc(allocator, 1024);
-    // defer allocator.free(body);
-
     if (std.mem.startsWith(u8, request.head.target, "/index.html")) {
         request.respond("", .{}) catch |err| {
             std.log.err("Error responding to request: {}", .{err});
@@ -73,11 +70,7 @@ fn handleRequest(request: *http.Server.Request, alloc: std.mem.Allocator, dirnam
             std.log.err("Error responding to request: {}", .{err});
         };
     } else if (std.mem.startsWith(u8, request.head.target, "/echo")) {
-        var echo = std.mem.splitAny(u8, request.head.target, "/");
-        _ = echo.next();
-        _ = echo.next();
-        const respEcho = echo.next().?;
-
+        const respEcho = request.head.target[6..];
         request.respond(respEcho, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} }) catch |err| {
             std.log.err("Error responding to request: {}", .{err});
         };
@@ -95,30 +88,53 @@ fn handleRequest(request: *http.Server.Request, alloc: std.mem.Allocator, dirnam
             std.log.err("Error responding to request: {}", .{err});
         };
     } else if (std.mem.startsWith(u8, request.head.target, "/files")) {
-        var fi = std.mem.splitAny(u8, request.head.target, "/");
-        _ = fi.next();
-        _ = fi.next();
-        const filename = fi.next().?;
+        const filename = request.head.target[7..];
+        try stdout.print("{s}\n", .{filename});
         const filepath = try std.fmt.allocPrint(alloc, "{s}{s}", .{ dirname, filename });
 
-        const file = std.fs.cwd().openFile(filepath, .{}) catch |err| {
-            switch (err) {
-                error.FileNotFound => {
-                    try request.respond("", .{ .status = .not_found });
-                    return;
-                },
-                else => {
-                    std.log.err("Error opening file: {}", .{err});
+        switch (request.head.method) {
+            .GET => {
+                const buff = std.fs.cwd().readFileAlloc(alloc, filepath, std.math.maxInt(usize)) catch |err| {
+                    switch (err) {
+                        error.FileNotFound => {
+                            try request.respond("", .{ .status = .not_found });
+                            return;
+                        },
+                        else => {
+                            std.log.err("Error opening file: {}", .{err});
+                            try request.respond("", .{ .status = .internal_server_error });
+                            return;
+                        },
+                    }
+                };
+                defer alloc.free(buff);
+
+                try request.respond(buff, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/octet-stream" }} });
+            },
+            .POST => {
+                const body = try (try request.reader()).readAllAlloc(alloc, 1024 * 1024);
+                defer alloc.free(body);
+
+                const file = std.fs.cwd().createFile(filepath, .{}) catch |err| {
+                    std.log.err("Error creating file: {}", .{err});
                     try request.respond("", .{ .status = .internal_server_error });
                     return;
-                },
-            }
-        };
-        defer file.close();
-        const buff = try std.fs.cwd().readFileAlloc(alloc, filepath, std.math.maxInt(usize));
-        defer alloc.free(buff);
+                };
+                defer file.close();
 
-        try request.respond(buff, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/octet-stream" }} });
+                file.writeAll(body) catch |err| {
+                    std.log.err("Error writing to file: {}", .{err});
+                    try request.respond("", .{ .status = .internal_server_error });
+                    return;
+                };
+
+                try request.respond("", .{ .status = .created });
+            },
+            else => {
+                try request.respond("", .{ .status = .internal_server_error });
+                return;
+            },
+        }
     } else {
         request.respond("", .{ .status = .not_found }) catch |err| {
             std.log.err("Error responding to request: {}", .{err});
