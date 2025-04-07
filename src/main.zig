@@ -71,9 +71,24 @@ fn handleRequest(request: *http.Server.Request, alloc: std.mem.Allocator, dirnam
         };
     } else if (std.mem.startsWith(u8, request.head.target, "/echo")) {
         const respEcho = request.head.target[6..];
-        request.respond(respEcho, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} }) catch |err| {
-            std.log.err("Error responding to request: {}", .{err});
-        };
+        var it = request.iterateHeaders();
+        var contentenc: []const u8 = undefined;
+
+        while (it.next()) |header| {
+            if (std.mem.eql(u8, header.name, "Accept-Encoding")) {
+                contentenc = header.value;
+            }
+        }
+
+        if (std.mem.eql(u8, contentenc, "gzip")) {
+            request.respond(respEcho, .{ .extra_headers = &.{ .{ .name = "Content-Type", .value = "text/plain" }, .{ .name = "Content-Encoding", .value = contentenc } } }) catch |err| {
+                std.log.err("Error responding to request: {}", .{err});
+            };
+        } else {
+            request.respond(respEcho, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "text/plain" }} }) catch |err| {
+                std.log.err("Error responding to request: {}", .{err});
+            };
+        }
     } else if (std.mem.startsWith(u8, request.head.target, "/user-agent")) {
         var it = request.iterateHeaders();
         var respBody: []const u8 = undefined;
